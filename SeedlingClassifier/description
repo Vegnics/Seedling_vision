@@ -1,0 +1,16 @@
+SeedlingClassifier_online.py -> Complete sequence of seedling sorting (including transplanting), with the model: MLmodel.pkl.
+                                No preprocessing techniques were used. It has some flaws, specially in the segmentation stage.
+
+SeedlingClassifier_offline.py-> Offline sequence of seedling sorting, with the model: MLmodel.pkl. No preprocessing techniques
+                                were used.
+
+SeedlingClassifier_online_v0.2.py -> Complete sequence of seedling sorting (including transplanting), with the model: MLmodel_v0.2.pkl.
+                                Now, preprocessing techniques were used. It was tested, outcoming good results in the afternoon. I have
+                                to test it under different lighting conditions.
+
+SeedlingClassifier_offline_v0.3.py -> I corrected the remove_small_contours() function and added the select_external_contours() function.
+                                       The cone-camera distance estimation algorithm is working.
+
+
+SeedlingClassifier_online_v0.3.py -> I'm using all the corrected/added functions of SeedlingClassifier_offline_v0.3.py in the online
+                                    version.
