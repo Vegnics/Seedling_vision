@@ -14,6 +14,7 @@ from threading import Timer,Thread
 import struct
 import numpy as np
 
+#CV_NO_CONNECTED = 0 -> This should be implemented on the PLC first
 CV_WAITING_STAT = 0
 CV_PROCESSING_STAT = 1
 CV_CAMERROR_STAT = 2
@@ -57,7 +58,7 @@ class SeedlingModbusClient(client):
                          "currentBTrayPos":4036,
                          "currentCTrayPos":4038,
                          "currentNeedlesX":4040,
-                         "currentNeedlesY":4042,
+                         "currentNeedlesZ":4042,
                          "gripperStatus":4044,
                          "alarms":4045,
                          "plcInstruction":4046,
@@ -71,8 +72,7 @@ class SeedlingModbusClient(client):
                          "z3Correction": 4109
                          }
     def connectToServer(self):
-        ret = self.connect()
-        return ret
+        return self.connect()
 
     def __checkPLCTimeOut(self):
         self.__timeoutThread = Timer(self.plcTimeout, self.__checkPLCTimeOut)
@@ -172,8 +172,8 @@ class SeedlingModbusClient(client):
         nxval = self.readModbusReal(self.regCodes["currentNeedlesX"])
         return nxval[0]
 
-    def getNeedlesYPosition(self):
-        nyval = self.readModbusReal(self.regCodes["currentNeedlesY"])
+    def getNeedlesZPosition(self):
+        nyval = self.readModbusReal(self.regCodes["currentNeedlesZ"])
         return nyval[0]
 
     def getGripperStatus(self):
@@ -211,7 +211,7 @@ class SeedlingModbusClient(client):
 
     def cvFinishProcessing(self):
         self.writeCvStatus(CV_PROCFINISHED_STAT)
-        sleep(0.5)
+        sleep(0.4)
         if self.usePlcTimeout is True:
             self.__checkPLCTimeOut()
             while ((self.getPLCInstruction() != PLC_ACK_INST) and  (self.__timeoutFlag is False)):
@@ -224,9 +224,15 @@ class SeedlingModbusClient(client):
             self.writeCvStatus(CV_WAITING_STAT)
 
     def writeZcorrection(self,z1val,z2val,z3val):
-        self.writeModbusReal(self.regCodes["z1Correction"],np.float32(z1val))
-        self.writeModbusReal(self.regCodes["z2Correction"],np.float32(z2val))
-        self.writeModbusReal(self.regCodes["z3Correction"],np.float32(z3val))
+        self.writeModbusReal(self.regCodes["z1Correction"],z1val)
+        self.writeModbusReal(self.regCodes["z2Correction"],z2val)
+        self.writeModbusReal(self.regCodes["z3Correction"],z3val)
+
+    def getZcorrection(self):
+        Z1_corr = self.readModbusReal(self.regCodes["z1Correction"])
+        Z2_corr = self.readModbusReal(self.regCodes["z2Correction"])
+        Z3_corr = self.readModbusReal(self.regCodes["z3Correction"])
+        return Z1_corr[0],Z2_corr[0],Z3_corr[0]
 
 
 
