@@ -1,0 +1,14 @@
+.idea/
+Deprecated/
+Info/
+NewColorSegmentation/
+Parameters_estimation/
+Sampling/
+Triangular_meshing/
+Viewers/
+datasets/
+nohup.out
+rectify_dataset/
+references/
+scripts4video/
+segmentation/
