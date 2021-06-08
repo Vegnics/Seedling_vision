@@ -72,7 +72,7 @@ mask_cones = np.zeros(depth_rgb.shape[0:2],dtype=np.uint8)
 depth_rgb_padded = np.zeros(depth_rgb.shape,dtype=np.uint8)
 
 kernel = highpass_butterworth_kernel(270,840,0.65,1.0,10,2)
-reference = cv2.imread("/home/amaranth/Desktop/Robot_UPAO/Seedling_vision/segmentation/clustering_with_preproc/imgsNmasks/rgb_reference.jpg",0)
+reference = cv2.imread("rgb_reference.jpg",0)
 
 ## OPEN MODELS
 file = open("MLmodel_v0.3.pkl", "rb")
