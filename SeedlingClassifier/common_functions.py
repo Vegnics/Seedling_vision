@@ -320,6 +320,253 @@ class seedlingClassifier():
         if self.reference is None:
             raise Exception("RGB reference image not found")
 
+    def modbusConnect(self,modbusClient): #### I need to know if I'm connected to the server.
+        self.modbusClient = modbusClient
+        if self.modbusClient.is_socket_open() is True:
+            print("Seedling classifier's connection to modbus server -> successful")
+            self.modbusConnectedFlag = True
+        else:
+            self.modbusConnectedFlag = False
+            print("Seedling classifier's connection to modbus server -> failed")
+
+    def writeSeedlingsQuality(self,q0,q1,q2):
+        if self.modbusConnectedFlag is True:
+            try:
+                self.modbusClient.writeSeedling1Quality(q0)
+                self.modbusClient.writeSeedling2Quality(q1)
+                self.modbusClient.writeSeedling3Quality(q2)
+            except:
+                print("Cannot send seedlings quality")
+        else:
+            print("Cannot send seedlings quality")
+
+    def cameraInitialize(self):
+        self.__rspipeline = rs.pipeline()
+        self.__rsconfig = rs.config()
+        self.__rsconfig.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        self.__rsconfig.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+
+        #First start
+        self.__rspipeline_profile = self.__rspipeline.start(self.__rsconfig)
+        self.__rsdepth_sensor = self.__rspipeline_profile.get_device().first_depth_sensor()
+        self.__rsdepth_sensor.set_option(rs.option.emitter_enabled, 1)
+        self.__rsdepth_sensor.set_option(rs.option.laser_power, 250)
+        self.__rsdepth_sensor.set_option(rs.option.depth_units, 0.0001)  # changed 0.0001
+        self.__temp_filter = rs.temporal_filter()
+        self.__temp_filter.set_option(rs.option.filter_smooth_alpha, 0.8)
+        self.__temp_filter.set_option(rs.option.filter_smooth_delta, 10)
+        self.__temp_filter.set_option(rs.option.holes_fill, 1.0)
+        self.__spatial_filter = rs.spatial_filter()
+        self.__spatial_filter.set_option(rs.option.holes_fill, 3)
+        sleep(0.06)
+        self.__rspipeline.stop()
+        sleep(0.06)
+        # Second start
+        self.__rspipeline_profile = self.__rspipeline.start(self.__rsconfig)
+        self.__rsdepth_sensor = self.__rspipeline_profile.get_device().first_depth_sensor()
+        self.__rsdepth_sensor.set_option(rs.option.emitter_enabled, 1)
+        self.__rsdepth_sensor.set_option(rs.option.laser_power, 250)
+        self.__rsdepth_sensor.set_option(rs.option.depth_units, 0.0001)  # changed 0.0001
+        self.__temp_filter = rs.temporal_filter()
+        self.__temp_filter.set_option(rs.option.filter_smooth_alpha, 0.8)
+        self.__temp_filter.set_option(rs.option.filter_smooth_delta, 10)
+        self.__temp_filter.set_option(rs.option.holes_fill, 1.0)
+        self.__spatial_filter = rs.spatial_filter()
+        self.__spatial_filter.set_option(rs.option.holes_fill, 3)
+        frames = self.__rspipeline.wait_for_frames(timeout_ms=2000)
+        aligned_frames = self.__align.process(frames)  # NEW
+        for i in range(self.initial_discard_frames):
+            depth_frame = aligned_frames.get_depth_frame()  # From frames.get_depth_frame()
+            color_frame = aligned_frames.get_color_frame()
+            depth_frame = self.__spatial_filter.process(depth_frame)
+            depth_frame = self.__temp_filter.process(depth_frame)
+        self.cameraInitializedFlag = True
+    def cameraRestart(self):
+        if self.__rspipeline is not None:
+            try:
+                self.cameraInitialize()
+            except Exception as e:
+                print("Camera not found: {}".format(e))
+    def getImages(self,mode):
+        if mode is "online":
+            if self.cameraInitializedFlag is False:
+                try:
+                    self.cameraInitialize()
+                except Exception as e:
+                    print("Camera not found: {}".format(e))
+            try:
+                self.intrinsics = self.__rspipeline_profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
+                frames = self.__rspipeline.wait_for_frames(timeout_ms=2000)
+                aligned_frames = self.__align.process(frames)  # NEW
+                for i in range(self.discard_frames):
+                    depth_frame = aligned_frames.get_depth_frame()  # From frames.get_depth_frame()
+                    color_frame = aligned_frames.get_color_frame()
+                    depth_frame = self.__spatial_filter.process(depth_frame)
+                    depth_frame = self.__temp_filter.process(depth_frame)
+                #    color_frame = frames.get_color_frame()
+                # depth_frame = aligned_frames.get_depth_frame() #From frames.get_depth_frame()
+                depth_frame = self.__temp_filter.process(depth_frame)
+                color_frame = aligned_frames.get_color_frame()  # From frames.get_color_frame()
+                depth_image = np.asanyarray(depth_frame.get_data())
+                color_image = np.asanyarray(color_frame.get_data())
+                self.depthImg = self.depth_scale*depth_image
+                self.rgbImg = color_image
+                return True
+            except Exception as e:
+                print("Problem while getting images: {}".format(e))
+                return False
+        elif mode is "offline":
+            return True
+        else:
+            raise Exception("Error during obtaining images: mode not specified")
+
+
+    def correctZValues(self,conedistances):
+        z1correction = (conedistances[0] - 46.16) * 10
+        z2correction = (conedistances[1] - 46.16) * 10
+        z3correction = (conedistances[2] - 46.16) * 10
+        self.modbusClient.writeZcorrection(z1correction,z2correction,z3correction)
+
+    def onlysegmentation(self,mode="offline"):
+        if self.cameraInitializedFlag is True or mode is "offline":
+            __processing_start = time()
+            if self.getImages(mode) is True:
+                rgbGUI = self.rgbImg.copy()
+                rgb_padded = np.zeros(self.rgbImg.shape, dtype=np.uint8)
+                rgb_padded[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]] = self.rgbImg[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]]
+                mask = np.zeros(self.rgbImg.shape[0:2], dtype=np.uint8)
+                mask_cones = np.zeros(self.rgbImg.shape[0:2], dtype=np.uint8)
+
+                ##Get the ROI
+                depth_roi = self.depthImg[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
+                rgb_roi = rgb_padded[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
+                rgb_roi = preprocess(rgb_roi,self.kernel,self.reference) ##ADDED THIS LINE
+
+                ##Segmentation using depth
+                mask_depth_roi = np.where((depth_roi < 0.473) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
+                preseg_rgb_roi = cv2.bitwise_and(rgb_roi, rgb_roi, mask=mask_depth_roi)
+
+                ##Segmentation using color
+                #Segmentation of Seedlings
+                preseg_hsv_roi = cv2.cvtColor(preseg_rgb_roi, cv2.COLOR_BGR2HSV)  # Convert image to HSV
+                reshaped_hsv_roi = np.reshape(preseg_hsv_roi, (preseg_hsv_roi.shape[0] * preseg_hsv_roi.shape[1], 3))  # Reshape image to be used by Kmeans
+                labeled = self.segmentationModel.predict(reshaped_hsv_roi)
+                #mask_roi = np.where((labeled == 1) | (labeled == 3) | (labeled == 6), 255, 0).astype(np.uint8)
+                #mask_roi = np.where((labeled == 1) | (labeled == 4) | (labeled == 6) | (labeled == 7) | (labeled == 8),255, 0).astype(np.uint8)
+                mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_roi = np.reshape(mask_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
+                mask[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_roi
+                mask = hole_filling(mask, 25)  # Hole filling
+                return cv2.bitwise_and(self.rgbImg,self.rgbImg,mask=mask)
+            else:
+                self.rgbImg = None
+                self.depthImg = None
+                print("Couldn't get the images")
+                return None
+        else:
+            print("Initialize the camera first")
+            return None
+
+    def processSeedlings(self,seedlingParity,mode="offline"):
+        if self.cameraInitializedFlag is True or mode is "offline":
+            __processing_start = time()
+            if self.getImages(mode) is True:
+                rgbGUI = self.rgbImg.copy()
+                rgb_padded = np.zeros(self.rgbImg.shape, dtype=np.uint8)
+                rgb_padded[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]] = self.rgbImg[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]]
+                mask = np.zeros(self.rgbImg.shape[0:2], dtype=np.uint8)
+                mask_cones = np.zeros(self.rgbImg.shape[0:2], dtype=np.uint8)
+
+                ##Get the ROI
+                depth_roi = self.depthImg[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
+                rgb_roi = rgb_padded[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
+                rgb_roi = preprocess(rgb_roi,self.kernel,self.reference) ##ADDED THIS LINE
+
+                ##Segmentation using depth
+                mask_depth_roi = np.where((depth_roi < 0.473) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
+                preseg_rgb_roi = cv2.bitwise_and(rgb_roi, rgb_roi, mask=mask_depth_roi)
+
+                ##Segmentation using color
+                #Segmentation of Seedlings
+                preseg_hsv_roi = cv2.cvtColor(preseg_rgb_roi, cv2.COLOR_BGR2HSV)  # Convert image to HSV
+                reshaped_hsv_roi = np.reshape(preseg_hsv_roi, (preseg_hsv_roi.shape[0] * preseg_hsv_roi.shape[1], 3))  # Reshape image to be used by Kmeans
+                labeled = self.segmentationModel.predict(reshaped_hsv_roi)
+                #mask_roi = np.where((labeled == 1) | (labeled == 3) | (labeled == 6), 255, 0).astype(np.uint8)
+                #mask_roi = np.where((labeled == 1) | (labeled == 4) | (labeled == 6) | (labeled == 7) | (labeled == 8),255, 0).astype(np.uint8)
+                mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_roi = np.reshape(mask_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
+                mask[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_roi
+                mask = hole_filling(mask, 25)  # Hole filling
+
+                #Segmentation of Cones
+                #mask_cones_roi = np.where((labeled == 2) | (labeled == 9) | (labeled == 3), 255, 0).astype(np.uint8)
+                mask_cones_roi = np.where((labeled==2)|(labeled==3)|(labeled==10),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_cones_roi = np.reshape(mask_cones_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
+                mask_cones[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_cones_roi
+
+                #Obtain camera-cones distances
+                cone_distances = estimate_cones_distances(mask_cones, self.depthImg, seedlingParity)
+
+                ##Obtain contours
+                if cv2.__version__ >= "4.0":
+                    contours, hierar = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+                else:
+                    _,contours, hierar = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+                contours,hierar = remove_small_contours(contours,hierar, 45)
+                cv2.drawContours(rgbGUI, contours, -1, [100, 60, 200], 2)
+
+                ## ASSIGN REGIONS AND CONTOURS TO SEEDLING HOLES AND CLASSIFY THEM
+                S0, S1, S2 = assign_to_seedling2(mask, contours,hierar, self.depthImg, self.hole_positions, 6.9,seedlingParity,self.intrinsics,cone_distances)
+                q0 = self.seedlingClassifierModel.predict([[S0.area, S0.height]])
+                q1 = self.seedlingClassifierModel.predict([[S1.area, S1.height]])
+                q2 = self.seedlingClassifierModel.predict([[S2.area, S2.height]])
+                cv2.rectangle(rgbGUI, *S0.enclosingBox, [255, 0, 0], 2)
+                cv2.rectangle(rgbGUI, *S1.enclosingBox, [255, 0, 0], 2)
+                cv2.rectangle(rgbGUI, *S2.enclosingBox, [255, 0, 0], 2)
+                print("Processing Time: {} seconds".format(time()-__processing_start))
+                print("S0: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S0.area, S0.height,q0,cone_distances[0]))
+                print("S1: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S1.area, S1.height,q1,cone_distances[1]))
+                print("S2: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S2.area, S2.height,q2,cone_distances[2]))
+                if self.modbusConnectedFlag == True:
+                    self.writeSeedlingsQuality(int(q0[0]),int(q1[0]),int(q2[0]))
+                    self.correctZValues(cone_distances)
+                    self.modbusClient.cvFinishProcessing()
+                    print("Results sent to server \n")
+                return rgbGUI
+            else:
+                self.rgbImg = None
+                self.depthImg = None
+                print("Couldn't get the images")
+                return None
+        else:
+            print("Initialize the camera first")
+
+"""
+class seedlingClassifier():
+    def __init__(self,segmentationModel,seedlingClassifierModel,intrinsics):
+        self.modbusClient = None
+        self.__rspipeline = None
+        self.__rsconfig = None
+        self.__align = rs.align(rs.stream.color)
+        self.modbusConnectedFlag = False
+        self.cameraInitializedFlag = False
+        self.depthImg = None
+        self.rgbImg = None
+        self.cvstatus = 0
+        self.initial_discard_frames = 30
+        self.discard_frames = 5
+        self.segmentationModel = segmentationModel
+        self.seedlingClassifierModel = seedlingClassifierModel
+        self.row_roi = 450
+        self.col_roi = [360, 1200]
+        self.hole_positions = [[-8.91548333333333,12.2185666666667],[-4.349625,11.0752125],[0.362765555555556,10.9953444444444],[4.84777,11.11838],[9.30483333333333,11.2195888888889],[14.1567625,11.200375]]
+        self.intrinsics = intrinsics
+        self.depth_scale = 9.999999747378752e-05
+        self.kernel = highpass_butterworth_kernel(270,840,0.65,1.0,10,2)
+        self.reference = cv2.imread("rgb_reference.jpg",0)
+        if self.reference is None:
+            raise Exception("RGB reference image not found")
+
     def modbusConnect(self,serverIp,serverPort): #### I need to know if I'm connected to the server.
         self.modbusClient = SeedlingModbusClient(serverIp,serverPort)
         self.modbusConnectedFlag = self.modbusClient.connectToServer()
@@ -421,6 +668,46 @@ class seedlingClassifier():
         z3correction = (conedistances[2] - 46.16) * 10
         self.modbusClient.writeZcorrection(z1correction,z2correction,z3correction)
 
+    def onlysegmentation(self):
+        if self.cameraInitializedFlag is True:
+            __processing_start = time()
+            if self.getImages() is True:
+                rgbGUI = self.rgbImg.copy()
+                rgb_padded = np.zeros(self.rgbImg.shape, dtype=np.uint8)
+                rgb_padded[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]] = self.rgbImg[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]]
+                mask = np.zeros(self.rgbImg.shape[0:2], dtype=np.uint8)
+                mask_cones = np.zeros(self.rgbImg.shape[0:2], dtype=np.uint8)
+
+                ##Get the ROI
+                depth_roi = self.depthImg[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
+                rgb_roi = rgb_padded[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
+                rgb_roi = preprocess(rgb_roi,self.kernel,self.reference) ##ADDED THIS LINE
+
+                ##Segmentation using depth
+                mask_depth_roi = np.where((depth_roi < 0.473) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
+                preseg_rgb_roi = cv2.bitwise_and(rgb_roi, rgb_roi, mask=mask_depth_roi)
+
+                ##Segmentation using color
+                #Segmentation of Seedlings
+                preseg_hsv_roi = cv2.cvtColor(preseg_rgb_roi, cv2.COLOR_BGR2HSV)  # Convert image to HSV
+                reshaped_hsv_roi = np.reshape(preseg_hsv_roi, (preseg_hsv_roi.shape[0] * preseg_hsv_roi.shape[1], 3))  # Reshape image to be used by Kmeans
+                labeled = self.segmentationModel.predict(reshaped_hsv_roi)
+                #mask_roi = np.where((labeled == 1) | (labeled == 3) | (labeled == 6), 255, 0).astype(np.uint8)
+                #mask_roi = np.where((labeled == 1) | (labeled == 4) | (labeled == 6) | (labeled == 7) | (labeled == 8),255, 0).astype(np.uint8)
+                mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_roi = np.reshape(mask_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
+                mask[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_roi
+                mask = hole_filling(mask, 25)  # Hole filling
+                return cv2.bitwise_and(self.rgbImg,self.rgbImg,mask=mask)
+            else:
+                self.rgbImg = None
+                self.depthImg = None
+                print("Couldn't get the images")
+                return None
+        else:
+            print("Initialize the camera first")
+            return None
+
     def processSeedlings(self,seedlingParity):
         if self.cameraInitializedFlag is True:
             __processing_start = time()
@@ -494,4 +781,8 @@ class seedlingClassifier():
                 return None
         else:
             print("Initialize the camera first")
-            return None
+"""
+
+#mqttTopics = {
+#    "": ,
+#}

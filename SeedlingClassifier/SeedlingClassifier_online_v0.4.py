@@ -23,7 +23,7 @@ if "-debug" in args:
 
 #GUI and mouse
 cv2.namedWindow("Results")
-cv2.setMouseCallback("Results", click_depth_rgb)
+#cv2.setMouseCallback("Results", click_depth_rgb)
 
 #set depth camera parameters
 distance=0.359

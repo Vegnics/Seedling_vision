@@ -12,3 +12,9 @@ rectify_dataset/
 references/
 scripts4video/
 segmentation/
+mybackup/
+Ericks_system/plantinator_ai_v2.1.py
+Ericks_system/yolov3_training_last.weights
+Ericks_system/images/
+SeedlingClassifier/__py*
+__py*
