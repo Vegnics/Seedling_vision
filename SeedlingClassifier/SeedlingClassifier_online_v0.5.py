@@ -60,7 +60,7 @@ intrinsics.fx=906.286
 intrinsics.fy=905.369
 intrinsics.model=rs.distortion.inverse_brown_conrady
 intrinsics.coeffs=[0.0,0.0,0.0,0.0,0.0]
-CV_system_switch = "SysE"
+CV_system_switch = "SysP"
 ODD_RGB = cv2.imread("Offline_files/IMG_15_27_56.jpg",cv2.IMREAD_COLOR)
 ODD_DEPTH = np.load("Offline_files/IMG_15_27_56.npy")
 EVEN_RGB = cv2.imread("Offline_files/IMG_15_38_14.jpg",cv2.IMREAD_COLOR)
@@ -113,10 +113,13 @@ if "-brokerPort" in args:
 
 #INITIALIZE MAIN MQTT CLIENT
 main_mqtt_client = mqttClient()
-if main_mqtt_client.connect(mqttBrokerIp,mqttBrokerPort) is True:
-    print("MQTT connection -> Successful")
-else:
-    print("MQTT connection -> Failed")
+#try:
+#    if main_mqtt_client.connect(mqttBrokerIp,mqttBrokerPort) is True:
+#        print("MQTT connection -> Successful")
+#    else:
+#        print("MQTT connection -> Failed")
+#except:
+#    print("MQTT connection -> Failed")
 
 if main_mqtt_client.is_connected():
     main_mqtt_client.on_connect = on_connect_
