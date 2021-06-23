@@ -9,6 +9,7 @@ import pickle
 import sys
 from numpy.fft import fft2,fftshift,ifft2,ifftshift
 from skimage.exposure import match_histograms
+from matplotlib import pyplot as plt
 
 sys.path.insert(1,"../")
 from modbus_mqtt.libseedlingmodbus import SeedlingModbusClient
@@ -28,7 +29,7 @@ class seedling():
         self.peakHeight = None
 
 
-def hole_filling(mask,thresh=25):
+def hole_filling(mask,NoiseThresh=25,HolesTresh=160):
     mask_ = mask
     ## Remove small regions in mask
     if cv2.__version__ >= "4.0":
@@ -38,7 +39,8 @@ def hole_filling(mask,thresh=25):
     assignedSeedlingRegions, labeled = assignLabelContour(mask_, contours)
     labels_to_remove = []
     for region in assignedSeedlingRegions:
-        if len(region.contour) < thresh:
+        #M = cv2.moments(region.contour) #Added 19/06/2021
+        if cv2.contourArea(region.contour) < NoiseThresh:
             labels_to_remove.append(region.label)
 
     for label in labels_to_remove:
@@ -48,6 +50,20 @@ def hole_filling(mask,thresh=25):
     num_labels, labeled = cv2.connectedComponents(mask_inv)
     label2remove = labeled[0,0]
     mask_inv = np.where(labeled == label2remove, 0, mask_inv)
+
+    if cv2.__version__ >= "4.0":
+        contours, hierar = cv2.findContours(mask_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    else:
+        _,contours, hierar = cv2.findContours(mask_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    assignedSeedlingRegions, labeled = assignLabelContour(mask_inv, contours)
+    labels_to_add = []
+    for region in assignedSeedlingRegions:
+        # M = cv2.moments(region.contour) #Added 19/06/2021
+        if cv2.contourArea(region.contour) < HolesTresh:
+            labels_to_add.append(region.label)
+    mask_inv = mask_inv*0
+    for label in labels_to_add:
+        mask_inv = np.where(labeled == label, 255, mask_inv).astype(np.uint8)
     filled_mask = mask_ + mask_inv
     return filled_mask
 
@@ -232,12 +248,12 @@ def estimate_cones_distances(mask,depthimg,parity):
     ## it would be neccessary to changes this ranges values according to the cones' positions.
     ROI_OK = False
     if parity is "odd":
-        cones_mask_roi=[mask[515:630,850:960],mask[515:630,670:780],mask[515:630,500:610]]
-        cones_depth_roi =[depthimg[515:630,850:960],depthimg[515:630,670:780],depthimg[515:630,500:610]]
+        cones_mask_roi=[mask[485:620,830:970],mask[485:620,660:830],mask[485:620,500:626]]
+        cones_depth_roi =[depthimg[485:620,830:970],depthimg[485:620,660:830],depthimg[485:620,500:626]]
 
     elif parity is "even":
-        cones_mask_roi=[mask[515:630, 770:880], mask[515:630, 580:690], mask[515:630, 415:525]]
-        cones_depth_roi=[depthimg[515:630, 770:880], depthimg[515:630, 580:690], depthimg[515:630, 415:525]]
+        cones_mask_roi=[mask[485:620, 755:885], mask[485:620, 580:695], mask[485:620, 405:545]]
+        cones_depth_roi=[depthimg[485:620, 755:885], depthimg[485:620, 580:695], depthimg[485:620, 405:545]]
     else:
         raise Exception("parity can only be odd or even")
 
@@ -246,7 +262,8 @@ def estimate_cones_distances(mask,depthimg,parity):
         roi = cones_mask_roi[cone_idx]
         cone_depthimg = 100*cones_depth_roi[cone_idx]
         cone_depthimg_aux = np.where(roi==255,cone_depthimg,0)
-        cone_depthimg_aux = np.where((48.6>cone_depthimg_aux) & (cone_depthimg_aux>45.66),cone_depthimg_aux,0)
+        cone_depthimg_aux = np.where((48.6>cone_depthimg_aux) & (cone_depthimg_aux>44.16),cone_depthimg_aux,0)
+        #plt.imshow(cone_depthimg_aux)
         masked_values = cone_depthimg_aux.astype(np.bool).astype(np.float)
         num_of_valids= masked_values.sum()
         depth_sum = cone_depthimg_aux.sum()
@@ -255,6 +272,7 @@ def estimate_cones_distances(mask,depthimg,parity):
             cones_distance.append(distance)
         else:
             cones_distance.append(46.16)
+        #plt.show()
     return cones_distance
 
 def highpass_butterworth_kernel(size0,size1,sl,sh,rc,n):
@@ -315,7 +333,7 @@ class seedlingClassifier():
         self.hole_positions = [[-8.91548333333333,12.2185666666667],[-4.349625,11.0752125],[0.362765555555556,10.9953444444444],[4.84777,11.11838],[9.30483333333333,11.2195888888889],[14.1567625,11.200375]]
         self.intrinsics = intrinsics
         self.depth_scale = 9.999999747378752e-05
-        self.kernel = highpass_butterworth_kernel(270,840,0.65,1.0,10,2)
+        self.kernel = highpass_butterworth_kernel(270,840,0.75,1.1,7,3)
         self.reference = cv2.imread("rgb_reference.jpg",0)
         if self.reference is None:
             raise Exception("RGB reference image not found")
@@ -443,7 +461,7 @@ class seedlingClassifier():
                 rgb_roi = preprocess(rgb_roi,self.kernel,self.reference) ##ADDED THIS LINE
 
                 ##Segmentation using depth
-                mask_depth_roi = np.where((depth_roi < 0.473) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
+                mask_depth_roi = np.where((depth_roi < 0.462) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
                 preseg_rgb_roi = cv2.bitwise_and(rgb_roi, rgb_roi, mask=mask_depth_roi)
 
                 ##Segmentation using color
@@ -453,10 +471,12 @@ class seedlingClassifier():
                 labeled = self.segmentationModel.predict(reshaped_hsv_roi)
                 #mask_roi = np.where((labeled == 1) | (labeled == 3) | (labeled == 6), 255, 0).astype(np.uint8)
                 #mask_roi = np.where((labeled == 1) | (labeled == 4) | (labeled == 6) | (labeled == 7) | (labeled == 8),255, 0).astype(np.uint8)
-                mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                #mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_roi = np.where((labeled == 5) |(labeled == 7) | (labeled == 11) | (labeled == 13) | (labeled == 14) | (labeled == 18) | (labeled == 20) | (labeled == 24) | (labeled == 26)|(labeled == 29)|(labeled == 31), 255, 0).astype(np.uint8)  # <- changed in 18/06
                 mask_roi = np.reshape(mask_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
                 mask[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_roi
-                mask = hole_filling(mask, 25)  # Hole filling
+                mask = hole_filling(mask, 400)  # Hole filling
+                #mask[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_depth_roi
                 return cv2.bitwise_and(self.rgbImg,self.rgbImg,mask=mask)
             else:
                 self.rgbImg = None
@@ -493,14 +513,15 @@ class seedlingClassifier():
                 labeled = self.segmentationModel.predict(reshaped_hsv_roi)
                 #mask_roi = np.where((labeled == 1) | (labeled == 3) | (labeled == 6), 255, 0).astype(np.uint8)
                 #mask_roi = np.where((labeled == 1) | (labeled == 4) | (labeled == 6) | (labeled == 7) | (labeled == 8),255, 0).astype(np.uint8)
-                mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                #mask_roi = np.where((labeled==1)|(labeled==4)|(labeled==5)|(labeled==6)|(labeled==7)|(labeled==9)|(labeled==11)|(labeled==13),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_roi = np.where((labeled == 5) |(labeled == 7) | (labeled == 11) | (labeled == 13) | (labeled == 14) | (labeled == 18) | (labeled == 20) | (labeled == 24) | (labeled == 26) | (labeled == 29) | (labeled == 31),255, 0).astype(np.uint8)  # <- changed in 18/06
                 mask_roi = np.reshape(mask_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
                 mask[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_roi
                 mask = hole_filling(mask, 25)  # Hole filling
 
                 #Segmentation of Cones
                 #mask_cones_roi = np.where((labeled == 2) | (labeled == 9) | (labeled == 3), 255, 0).astype(np.uint8)
-                mask_cones_roi = np.where((labeled==2)|(labeled==3)|(labeled==10),255,0).astype(np.uint8) # <- changed in 02/06
+                mask_cones_roi = np.where((labeled==0)|(labeled==4)|(labeled==10)|(labeled==21)|(labeled==25),255,0).astype(np.uint8) # <- changed in 02/06
                 mask_cones_roi = np.reshape(mask_cones_roi, (preseg_hsv_roi.shape[0], preseg_hsv_roi.shape[1]))
                 mask_cones[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_cones_roi
 
@@ -523,15 +544,17 @@ class seedlingClassifier():
                 cv2.rectangle(rgbGUI, *S0.enclosingBox, [255, 0, 0], 2)
                 cv2.rectangle(rgbGUI, *S1.enclosingBox, [255, 0, 0], 2)
                 cv2.rectangle(rgbGUI, *S2.enclosingBox, [255, 0, 0], 2)
-                print("Processing Time: {} seconds".format(time()-__processing_start))
                 print("S0: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S0.area, S0.height,q0,cone_distances[0]))
                 print("S1: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S1.area, S1.height,q1,cone_distances[1]))
                 print("S2: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S2.area, S2.height,q2,cone_distances[2]))
+                print("Processing Time: {} seconds".format(time() - __processing_start))
                 if self.modbusConnectedFlag == True:
+                    __sending_start = time()
+                    print("Sending results to the server ...")
                     self.writeSeedlingsQuality(int(q0[0]),int(q1[0]),int(q2[0]))
                     self.correctZValues(cone_distances)
                     self.modbusClient.cvFinishProcessing()
-                    print("Results sent to server \n")
+                    print("Results sent to server. Sending time: {} seconds \n".format(time()-__sending_start))
                 return rgbGUI
             else:
                 self.rgbImg = None

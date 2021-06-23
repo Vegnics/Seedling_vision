@@ -10,6 +10,7 @@ import sys
 from numpy.fft import fft2,fftshift,ifft2,ifftshift
 from skimage.exposure import match_histograms
 from paho.mqtt.client import Client as mqttClient
+from matplotlib import pyplot as plt #JUST TO SEE THE GRADIENT
 
 sys.path.insert(1,"../")
 from modbus_mqtt.libseedlingmodbus import SeedlingModbusClient
@@ -61,10 +62,14 @@ intrinsics.fy=905.369
 intrinsics.model=rs.distortion.inverse_brown_conrady
 intrinsics.coeffs=[0.0,0.0,0.0,0.0,0.0]
 CV_system_switch = "SysP"
-ODD_RGB = cv2.imread("Offline_files/IMG_15_27_56.jpg",cv2.IMREAD_COLOR)
-ODD_DEPTH = np.load("Offline_files/IMG_15_27_56.npy")
-EVEN_RGB = cv2.imread("Offline_files/IMG_15_38_14.jpg",cv2.IMREAD_COLOR)
-EVEN_DEPTH = np.load("Offline_files/IMG_15_38_14.npy")
+#ODD_RGB = cv2.imread("Offline_files/IMG_17_50_40.jpg",cv2.IMREAD_COLOR)
+#ODD_DEPTH = np.load("Offline_files/IMG_17_50_40.npy")
+ODD_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_15_5_36.jpg",cv2.IMREAD_COLOR)
+ODD_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_15_5_36.npy")
+#EVEN_RGB = cv2.imread("Offline_files/IMG_15_38_14.jpg",cv2.IMREAD_COLOR)
+#EVEN_DEPTH = np.load("Offline_files/IMG_15_38_14.npy")
+EVEN_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_14_32_44.jpg",cv2.IMREAD_COLOR)
+EVEN_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_14_32_44.npy")
 CV_MODE = "offline"
 
 ## OPEN MODELS
@@ -144,7 +149,7 @@ cvSystem2 = ericks_functions.ErickSeedlingClassifier(modbusClient)
 
 if modbusClientConnectedFlag is True:
     modbusClient.writeCvStatus(lsmodb.CV_WAITING_STAT)
-plcInstruction = lsmodb.PLC_PROCODD_INST
+plcInstruction = lsmodb.PLC_PROCEVEN_INST
 
 while True:
     if modbusClientConnectedFlag is True:
@@ -195,7 +200,7 @@ while True:
             print("WARNING: Seedling Classifier system wasn't specified")
     try:
         cv2.imshow("Results",rgbGUI)
-        cv2.waitKey(4500)
+        cv2.waitKey(0)
         cv2.destroyAllWindows()
         finished = True
     except:

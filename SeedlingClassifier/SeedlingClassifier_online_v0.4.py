@@ -40,7 +40,7 @@ intrinsics.coeffs=[0.0,0.0,0.0,0.0,0.0]
 
 
 ## OPEN MODELS
-file = open("MLmodel_v0.3.pkl", "rb")
+file = open("../Deprecated/MLmodel_v0.3.pkl", "rb")
 segmentation_model = pickle.load(file)
 file2 = open("Seedling_Classifier_model.pkl", "rb")
 seedling_classifier = pickle.load(file2)

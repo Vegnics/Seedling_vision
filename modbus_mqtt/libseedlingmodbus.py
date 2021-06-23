@@ -216,6 +216,8 @@ class SeedlingModbusClient(client):
             self.__checkPLCTimeOut()
             while ((self.getPLCInstruction() != PLC_ACK_INST) and  (self.__timeoutFlag is False)):
                 pass
+            if self.__timeoutFlag is True:
+                print("WARNING: Acknowledged message didn't arrive within {} seconds".format(self.plcTimeout))
             self.__timeoutFlag = False
             self.writeCvStatus(CV_WAITING_STAT)
         else:
