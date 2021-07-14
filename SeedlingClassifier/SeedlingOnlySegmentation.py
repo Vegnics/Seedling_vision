@@ -12,6 +12,9 @@ from skimage.exposure import match_histograms
 from paho.mqtt.client import Client as mqttClient
 from matplotlib import pyplot as plt #JUST TO SEE THE GRADIENT
 from glob import glob
+import warnings
+warnings.filterwarnings("ignore")
+
 
 sys.path.insert(1,"../")
 from modbus_mqtt.libseedlingmodbus import SeedlingModbusClient
@@ -39,6 +42,17 @@ def on_message_(self, userdata, msg):
     else:
         print("CV system switched to default")
         CV_system_switch = "SysP"
+
+def click_labeled(event, x, y, flags, param):
+    if event == cv2.EVENT_LBUTTONDOWN:
+        print("Label: {}".format(labeled_full[y,x])) #
+        print("Distances: {}".format(dists_full[y,x]))
+        #print("Distances: {}.".format(kmeans_model.transform(colordata.reshape(1,-1))))
+    return
+
+
+cv2.namedWindow("segmented")
+cv2.setMouseCallback("segmented", click_labeled)
 
 args = sys.argv
 
@@ -73,10 +87,10 @@ CV_MODE = "offline"
 
 ## OPEN MODELS
 #Paulo's CV system related models
-file = open("MLmodel_v0.3.pkl", "rb")
-segmentation_model = pickle.load(file)
-file2 = open("Seedling_Classifier_model.pkl", "rb")
-seedling_classifier = pickle.load(file2)
+#file = open("../Deprecated/kmeans_model_v0.5.pkl", "rb")
+#segmentation_model = pickle.load(file)
+#file2 = open("../Deprecated/Seedling_Classifier_model.pkl", "rb")
+#seedling_classifier = pickle.load(file2)
 #Erick's CV system related models
 
 
@@ -138,7 +152,11 @@ else:
 
 #INITIALIZE COMPUTER VISION SYSTEMS
 #Paulo's CV
-cvSystem = seedlingClassifier(segmentation_model,seedling_classifier,intrinsics)
+cvSystem = seedlingClassifier(intrinsics)
+#cvSystem.initial_centroids = np.load("../Deprecated/initial_centroids.npy")
+#cvSystem.initial_centroid_idx = {"seedlings":[2,3,4,6,8,9,10,11,12,13],"cones":[5,7,14],"bg":[0,1]}
+with open("colors_ellipsoids_dict.pkl","rb") as file:
+    cvSystem.ellipsoids_dict = pickle.load(file)
 #cvSystem.modbusConnect(modbusClient)
 #if CV_MODE is "online":
 #    cvSystem.cameraInitialize()
@@ -162,65 +180,12 @@ files = glob("../datasets/seedling_dataset_02_06_2021_21/*.jpg")
 #cv2.destroyAllWindows()
 
 for file in files:
+    print(file)
     cvSystem.rgbImg = cv2.imread(file, 1)
     cvSystem.depthImg = np.load(file[0:-3] + "npy")
-    segmented= cvSystem.onlysegmentation()
+    seedling_mask,cones_mask= cvSystem.onlysegmentation()
+    segmented = cv2.bitwise_and(cvSystem.rgbImg,cvSystem.rgbImg,mask=seedling_mask)
+    cv2.imshow("original",cvSystem.rgbImg)
     cv2.imshow("segmented", segmented)
     cv2.waitKey(0)
-    cv2.destroyAllWindows()
-"""
-while True:
-    if modbusClientConnectedFlag is True:
-        plcInstruction = modbusClient.getPLCInstruction()
-    if plcInstruction == lsmodb.PLC_PROCODD_INST:
-        if CV_system_switch == "SysP":
-            if cvSystem.modbusConnectedFlag is True:
-                cvSystem.modbusClient.writeCvStatus(lsmodb.CV_PROCESSING_STAT)
-            if CV_MODE == "offline":
-                cvSystem.rgbImg = ODD_RGB
-                cvSystem.depthImg = ODD_DEPTH
-            rgbGUI = cvSystem.processSeedlings("odd",CV_MODE) # IM CHANGING CONSTANTLY THIS PARAMETER
-            #SAVE IMAGES
-            #ltime = localtime()
-            #name = "seedling_dataset_02_06_2021_21/IMG_{}_{}_{}".format(ltime.tm_hour,ltime.tm_min,ltime.tm_sec)
-            #print(name)
-            #cv2.imwrite(name+".jpg",cvSystem.rgbImg)
-            #np.save(name+".npy",cvSystem.depthImg)
-        elif CV_system_switch is "SysE":
-            if CV_MODE is "offline":
-                cvSystem.rgbImg = ODD_RGB
-                cvSystem.depthImg = ODD_DEPTH
-            segmentedImg = cvSystem.onlysegmentation(CV_MODE)
-            cvSystem2.processImage(segmentedImg)
-        else:
-            print("WARNING: Seedling Classifier system wasn't specified")
-    elif plcInstruction == lsmodb.PLC_PROCEVEN_INST:
-        if CV_system_switch is "SysP":
-            if cvSystem.modbusConnectedFlag is True:
-                cvSystem.modbusClient.writeCvStatus(lsmodb.CV_PROCESSING_STAT)
-            if CV_MODE is "offline":
-                cvSystem.rgbImg = EVEN_RGB
-                cvSystem.depthImg = EVEN_DEPTH
-            rgbGUI = cvSystem.processSeedlings("even",CV_MODE)
-            # SAVE IMAGES
-            #ltime = localtime()
-            #name = "seedling_dataset_02_06_2021_21/IMG_{}_{}_{}".format(ltime.tm_hour, ltime.tm_min, ltime.tm_sec)
-            #print(name)
-            #cv2.imwrite(name + ".jpg", cvSystem.rgbImg)
-            #np.save(name + ".npy", cvSystem.depthImg)
-        elif CV_system_switch is "SysE":
-            if CV_MODE is "offline":
-                cvSystem.rgbImg = EVEN_RGB
-                cvSystem.depthImg = EVEN_DEPTH
-            segmentedImg = cvSystem.onlysegmentation(CV_MODE)
-            cvSystem2.processImage(segmentedImg)
-        else:
-            print("WARNING: Seedling Classifier system wasn't specified")
-    try:
-        cv2.imshow("Results",rgbGUI)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        finished = True
-    except:
-        pass
-"""
+cv2.destroyAllWindows()

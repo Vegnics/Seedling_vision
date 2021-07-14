@@ -104,4 +104,5 @@ modbus_thread = Thread(target=thread_modbus_server)
 modbus_thread.start()
 print("Modbus Server Started ...")
 while True:
+    sleep(3)
     pass

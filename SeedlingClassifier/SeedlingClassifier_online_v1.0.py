@@ -11,11 +11,13 @@ from numpy.fft import fft2,fftshift,ifft2,ifftshift
 from skimage.exposure import match_histograms
 from paho.mqtt.client import Client as mqttClient
 from matplotlib import pyplot as plt #JUST TO SEE THE GRADIENT
+import warnings
+warnings.filterwarnings("ignore")
 
 sys.path.insert(1,"../")
 from modbus_mqtt.libseedlingmodbus import SeedlingModbusClient
 from modbus_mqtt import libseedlingmodbus as lsmodb
-from common_functions2 import *
+from common_functions import *
 from Ericks_system import ericks_functions
 
 
@@ -62,22 +64,22 @@ intrinsics.fy=905.369
 intrinsics.model=rs.distortion.inverse_brown_conrady
 intrinsics.coeffs=[0.0,0.0,0.0,0.0,0.0]
 CV_system_switch = "SysP"
-#ODD_RGB = cv2.imread("Offline_files/IMG_17_50_40.jpg",cv2.IMREAD_COLOR)
-#ODD_DEPTH = np.load("Offline_files/IMG_17_50_40.npy")
-ODD_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_15_5_36.jpg",cv2.IMREAD_COLOR)
-ODD_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_15_5_36.npy")
-#EVEN_RGB = cv2.imread("Offline_files/IMG_15_38_14.jpg",cv2.IMREAD_COLOR)
-#EVEN_DEPTH = np.load("Offline_files/IMG_15_38_14.npy")
-EVEN_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_14_32_44.jpg",cv2.IMREAD_COLOR)
-EVEN_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_14_32_44.npy")
+ODD_RGB = cv2.imread("Offline_files/IMG_17_50_40.jpg",cv2.IMREAD_COLOR)
+ODD_DEPTH = np.load("Offline_files/IMG_17_50_40.npy")
+#ODD_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_15_5_36.jpg",cv2.IMREAD_COLOR)
+#ODD_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_15_5_36.npy")
+EVEN_RGB = cv2.imread("Offline_files/IMG_15_38_14.jpg",cv2.IMREAD_COLOR)
+EVEN_DEPTH = np.load("Offline_files/IMG_15_38_14.npy")
+#EVEN_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_14_32_44.jpg",cv2.IMREAD_COLOR)
+#EVEN_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_14_32_44.npy")
 CV_MODE = "offline"
 
 ## OPEN MODELS
 #Paulo's CV system related models
-file = open("kmeans_model_v0.4.pkl", "rb")
-segmentation_model = pickle.load(file)
-file2 = open("Seedling_Classifier_model.pkl", "rb")
-seedling_classifier = pickle.load(file2)
+#file = open("../Deprecated/kmeans_model_v0.4.pkl", "rb")
+#segmentation_model = pickle.load(file)
+#file2 = open("../Deprecated/Seedling_Classifier_model.pkl", "rb")
+#seedling_classifier = pickle.load(file2)
 #Erick's CV system related models
 
 
@@ -139,7 +141,7 @@ else:
 
 #INITIALIZE COMPUTER VISION SYSTEMS
 #Paulo's CV
-cvSystem = seedlingClassifier(segmentation_model,seedling_classifier,intrinsics)
+cvSystem = seedlingClassifier(intrinsics)
 with open("colors_ellipsoids_dict.pkl","rb") as file:
     cvSystem.ellipsoids_dict = pickle.load(file)
 cvSystem.modbusConnect(modbusClient)
@@ -174,8 +176,10 @@ while True:
             if CV_MODE is "offline":
                 cvSystem.rgbImg = ODD_RGB
                 cvSystem.depthImg = ODD_DEPTH
-            segmentedImg = cvSystem.onlysegmentation(CV_MODE)
+            seedlings_mask,cones_mask = cvSystem.onlysegmentation(CV_MODE)
+            segmentedImg = cv2.bitwise_and(cvSystem.rgbImg,cvSystem.rgbImg,mask=seedlings_mask)
             cvSystem2.processImage(segmentedImg)
+            rgbGUI = segmentedImg.copy()
         else:
             print("WARNING: Seedling Classifier system wasn't specified")
     elif plcInstruction == lsmodb.PLC_PROCEVEN_INST:
@@ -196,14 +200,15 @@ while True:
             if CV_MODE is "offline":
                 cvSystem.rgbImg = EVEN_RGB
                 cvSystem.depthImg = EVEN_DEPTH
-            segmentedImg = cvSystem.onlysegmentation(CV_MODE)
+            seedlings_mask, cones_mask = cvSystem.onlysegmentation(CV_MODE)
+            segmentedImg = cv2.bitwise_and(cvSystem.rgbImg, cvSystem.rgbImg, mask=seedlings_mask)
             cvSystem2.processImage(segmentedImg)
+            rgbGUI = segmentedImg.copy()
         else:
             print("WARNING: Seedling Classifier system wasn't specified")
     try:
         cv2.imshow("Results",rgbGUI)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        finished = True
+        cv2.waitKey(20)
     except:
         pass
+cv2.destroyAllWindows()
