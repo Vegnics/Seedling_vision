@@ -15,7 +15,7 @@ from matplotlib import pyplot as plt #JUST TO SEE THE GRADIENT
 sys.path.insert(1,"../")
 from modbus_mqtt.libseedlingmodbus import SeedlingModbusClient
 from modbus_mqtt import libseedlingmodbus as lsmodb
-from common_functions import *
+from common_functions2 import *
 from Ericks_system import ericks_functions
 
 
@@ -74,7 +74,7 @@ CV_MODE = "offline"
 
 ## OPEN MODELS
 #Paulo's CV system related models
-file = open("MLmodel_v0.3.pkl", "rb")
+file = open("kmeans_model_v0.4.pkl", "rb")
 segmentation_model = pickle.load(file)
 file2 = open("Seedling_Classifier_model.pkl", "rb")
 seedling_classifier = pickle.load(file2)
@@ -140,6 +140,8 @@ else:
 #INITIALIZE COMPUTER VISION SYSTEMS
 #Paulo's CV
 cvSystem = seedlingClassifier(segmentation_model,seedling_classifier,intrinsics)
+with open("colors_ellipsoids_dict.pkl","rb") as file:
+    cvSystem.ellipsoids_dict = pickle.load(file)
 cvSystem.modbusConnect(modbusClient)
 if CV_MODE is "online":
     cvSystem.cameraInitialize()
