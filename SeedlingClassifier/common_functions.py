@@ -552,7 +552,7 @@ class seedlingClassifier():
         if self.modbusConnectedFlag == True:
             __sending_start = time()
             print("Sending results to the server ...")
-            self.writeSeedlingsQuality(int(q0[0]),int(q1[0]),int(q2[0]))
+            self.writeSeedlingsQuality(int(q0),int(q1),int(q2))#self.writeSeedlingsQuality(int(q0),int(q1[0]),int(q2[0]))
             self.correctZValues(cone_distances)
             self.modbusClient.cvFinishProcessing()
             print("Results sent to server. Sending time: {} seconds \n".format(time()-__sending_start))
