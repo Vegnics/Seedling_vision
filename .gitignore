@@ -19,4 +19,5 @@ Ericks_system/images/
 SeedlingClassifier/__py*
 SeedlingClassifier/seedling_area_only.py
 SeedlingClassifier/seedling_measurements.py
+SeedlingClassifier/SeedlingOnlySegmentation.py
 __py*
