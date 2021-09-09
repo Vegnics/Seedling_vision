@@ -2,15 +2,13 @@ import cv2
 import numpy as np
 import pyrealsense2 as rs
 from pyleafarea import pyAreaCalc,pyTriangulateAndArea
-from sklearn.naive_bayes import GaussianNB
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 from time import time,sleep,localtime
 import pickle
 import sys
 from numpy.fft import fft2,fftshift,ifft2,ifftshift
 from skimage.exposure import match_histograms
 from paho.mqtt.client import Client as mqttClient
-from matplotlib import pyplot as plt #JUST TO SEE THE GRADIENT
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -73,13 +71,10 @@ EVEN_DEPTH = np.load("Offline_files/IMG_15_38_14.npy")
 #EVEN_RGB = cv2.imread("../datasets/seedlings_18_06_2021/IMG_14_32_44.jpg",cv2.IMREAD_COLOR)
 #EVEN_DEPTH = np.load("../datasets/seedlings_18_06_2021/IMG_14_32_44.npy")
 CV_MODE = "offline"
+SAVE_IMAGES = True
 
 ## OPEN MODELS
 #Paulo's CV system related models
-#file = open("../Deprecated/kmeans_model_v0.4.pkl", "rb")
-#segmentation_model = pickle.load(file)
-#file2 = open("../Deprecated/Seedling_Classifier_model.pkl", "rb")
-#seedling_classifier = pickle.load(file2)
 #Erick's CV system related models
 
 
@@ -89,6 +84,7 @@ modServerIp = "192.168.1.103"
 modServerPort = 5030
 mqttBrokerIp = "192.168.1.103"
 mqttBrokerPort = 1883
+plugTrayNum = None
 
 if "-serverIp" in args:
     idx = args.index("-serverIp")
@@ -118,6 +114,13 @@ if "-brokerPort" in args:
     except:
         raise Exception("Broker's Port wasn't specified or is not valid" )
 
+if "-trayNum" in args:
+    idx = args.index("-trayNum")
+    try:
+        plugTrayNum = int(args[idx + 1])
+    except:
+        raise Exception("Tray number wasn't specified or is not valid")
+
 #INITIALIZE MAIN MQTT CLIENT
 main_mqtt_client = mqttClient()
 #try:
@@ -144,6 +147,10 @@ else:
 cvSystem = seedlingClassifier(intrinsics)
 with open("colors_ellipsoids_dict.pkl","rb") as file:
     cvSystem.ellipsoids_dict = pickle.load(file)
+    file.close()
+file = open("leaf_area_seedling_classifier.pkl", "rb")
+cvSystem.seedlingClassifierModel = pickle.load(file)
+file.close()
 cvSystem.modbusConnect(modbusClient)
 if CV_MODE is "online":
     cvSystem.cameraInitialize()
@@ -153,7 +160,7 @@ cvSystem2 = ericks_functions.ErickSeedlingClassifier(modbusClient)
 
 if modbusClientConnectedFlag is True:
     modbusClient.writeCvStatus(lsmodb.CV_WAITING_STAT)
-plcInstruction = lsmodb.PLC_PROCEVEN_INST
+plcInstruction = lsmodb.PLC_PROCODD_INST
 
 while True:
     if modbusClientConnectedFlag is True:
@@ -166,12 +173,16 @@ while True:
                 cvSystem.rgbImg = ODD_RGB
                 cvSystem.depthImg = ODD_DEPTH
             rgbGUI = cvSystem.processSeedlings("odd",CV_MODE) # IM CHANGING CONSTANTLY THIS PARAMETER
-            #SAVE IMAGES
-            #ltime = localtime()
-            #name = "seedling_dataset_02_06_2021_21/IMG_{}_{}_{}".format(ltime.tm_hour,ltime.tm_min,ltime.tm_sec)
-            #print(name)
-            #cv2.imwrite(name+".jpg",cvSystem.rgbImg)
-            #np.save(name+".npy",cvSystem.depthImg)
+            if CV_MODE == "online":
+                #SAVE IMAGES
+                if SAVE_IMAGES is True:
+                    ltime = localtime()
+                    if plugTrayNum is not None:
+                        name = "images/IMG{}_{}_{}_{}".format(plugTrayNum,ltime.tm_hour, ltime.tm_min,ltime.tm_sec)
+                    else:
+                        name = "images/IMG_{}_{}_{}".format(ltime.tm_hour, ltime.tm_min,ltime.tm_sec)
+                    cv2.imwrite(name+".png",cvSystem.rgbImg)
+                    np.save(name+".npy",cvSystem.depthImg)
         elif CV_system_switch is "SysE":
             if CV_MODE is "offline":
                 cvSystem.rgbImg = ODD_RGB
@@ -190,12 +201,16 @@ while True:
                 cvSystem.rgbImg = EVEN_RGB
                 cvSystem.depthImg = EVEN_DEPTH
             rgbGUI = cvSystem.processSeedlings("even",CV_MODE)
-            # SAVE IMAGES
-            #ltime = localtime()
-            #name = "seedling_dataset_02_06_2021_21/IMG_{}_{}_{}".format(ltime.tm_hour, ltime.tm_min, ltime.tm_sec)
-            #print(name)
-            #cv2.imwrite(name + ".jpg", cvSystem.rgbImg)
-            #np.save(name + ".npy", cvSystem.depthImg)
+            if CV_MODE == "online":
+                # SAVE IMAGES
+                if SAVE_IMAGES is True:
+                    ltime = localtime()
+                    if plugTrayNum is not None:
+                        name = "images/IMG{}_{}_{}_{}".format(plugTrayNum, ltime.tm_hour,ltime.tm_min, ltime.tm_sec)
+                    else:
+                        name = "images/IMG_{}_{}_{}".format(ltime.tm_hour, ltime.tm_min,ltime.tm_sec)
+                    cv2.imwrite(name + ".png", cvSystem.rgbImg)
+                    np.save(name + ".npy", cvSystem.depthImg)
         elif CV_system_switch is "SysE":
             if CV_MODE is "offline":
                 cvSystem.rgbImg = EVEN_RGB
@@ -208,7 +223,7 @@ while True:
             print("WARNING: Seedling Classifier system wasn't specified")
     try:
         cv2.imshow("Results",rgbGUI)
-        cv2.waitKey(20)
+        cv2.waitKey(0)
     except:
         pass
 cv2.destroyAllWindows()

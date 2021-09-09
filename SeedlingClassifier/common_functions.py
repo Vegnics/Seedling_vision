@@ -8,7 +8,6 @@ import pickle
 import sys
 from numpy.fft import fft2,fftshift,ifft2,ifftshift
 from skimage.exposure import match_histograms
-from matplotlib import pyplot as plt
 from skimage.segmentation import slic
 
 sys.path.insert(1,"../")
@@ -27,6 +26,13 @@ class seedling():
         self.height = None
         self.enclosingBox = None
         self.peakHeight = None
+
+
+def colorizeDepth(depth,min,max):
+    normalized = 255.0 * (depth - min) / (max - min)
+    normalized = np.clip(normalized, 0, 255).astype(np.uint8)
+    colorized = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
+    return colorized
 
 
 def removeSmallRegions(mask,RegionThresh=100):
@@ -280,6 +286,11 @@ def classifySeedling(seedlingArea,margins):
     else:
         return [0.0]
 
+def checkIfInRange(val,lowerT,upperT):
+    if lowerT[0]<=val[0] and val[0]<= upperT[0] and lowerT[1]<=val[1] and val[1]<= upperT[1] and lowerT[2]<=val[2] and val[2]<= upperT[2]:
+        return True
+    else:
+        return False
 """
 SLIC-Ellipsoid based segmentation funcions
 """
@@ -326,8 +337,7 @@ class seedlingClassifier():
         self.cvstatus = 0
         self.initial_discard_frames = 30
         self.discard_frames = 5
-        #self.segmentationModel = segmentationModel
-        #self.seedlingClassifierModel = seedlingClassifierModel
+        self.seedlingClassifierModel = None
         self.row_roi = 450
         self.col_roi = [360, 1200]
         self.hole_positions = [[-8.91548333333333,12.2185666666667],[-4.349625,11.0752125],[0.362765555555556,10.9953444444444],[4.84777,11.11838],[9.30483333333333,11.2195888888889],[14.1567625,11.200375]]
@@ -370,8 +380,8 @@ class seedlingClassifier():
         self.__temp_filter.set_option(rs.option.filter_smooth_alpha, 0.8)
         self.__temp_filter.set_option(rs.option.filter_smooth_delta, 10)
         self.__temp_filter.set_option(rs.option.holes_fill, 1.0)
-        self.__spatial_filter = rs.spatial_filter()
-        self.__spatial_filter.set_option(rs.option.holes_fill, 3)
+        #self.__spatial_filter = rs.spatial_filter()
+        #self.__spatial_filter.set_option(rs.option.holes_fill, 3)
         sleep(0.06)
         self.__rspipeline.stop()
         sleep(0.06)
@@ -380,19 +390,19 @@ class seedlingClassifier():
         self.__rsdepth_sensor = self.__rspipeline_profile.get_device().first_depth_sensor()
         self.__rsdepth_sensor.set_option(rs.option.emitter_enabled, 1)
         self.__rsdepth_sensor.set_option(rs.option.laser_power, 250)
-        self.__rsdepth_sensor.set_option(rs.option.depth_units, 0.0001)  # changed 0.0001
+        self.__rsdepth_sensor.set_option(rs.option.depth_units, 0.0001)
         self.__temp_filter = rs.temporal_filter()
-        self.__temp_filter.set_option(rs.option.filter_smooth_alpha, 0.8)
+        self.__temp_filter.set_option(rs.option.filter_smooth_alpha, 0.7)
         self.__temp_filter.set_option(rs.option.filter_smooth_delta, 10)
         self.__temp_filter.set_option(rs.option.holes_fill, 1.0)
-        self.__spatial_filter = rs.spatial_filter()
-        self.__spatial_filter.set_option(rs.option.holes_fill, 3)
+        #self.__spatial_filter = rs.spatial_filter()
+        #self.__spatial_filter.set_option(rs.option.holes_fill, 3)
         frames = self.__rspipeline.wait_for_frames(timeout_ms=2000)
-        aligned_frames = self.__align.process(frames)  # NEW
+        aligned_frames = self.__align.process(frames)
         for i in range(self.initial_discard_frames):
-            depth_frame = aligned_frames.get_depth_frame()  # From frames.get_depth_frame()
+            depth_frame = aligned_frames.get_depth_frame()
             color_frame = aligned_frames.get_color_frame()
-            depth_frame = self.__spatial_filter.process(depth_frame)
+            #depth_frame = self.__spatial_filter.process(depth_frame)
             depth_frame = self.__temp_filter.process(depth_frame)
         self.cameraInitializedFlag = True
     def cameraRestart(self):
@@ -415,7 +425,7 @@ class seedlingClassifier():
                 for i in range(self.discard_frames):
                     depth_frame = aligned_frames.get_depth_frame()  # From frames.get_depth_frame()
                     color_frame = aligned_frames.get_color_frame()
-                    depth_frame = self.__spatial_filter.process(depth_frame)
+                    #depth_frame = self.__spatial_filter.process(depth_frame)
                     depth_frame = self.__temp_filter.process(depth_frame)
                 depth_frame = self.__temp_filter.process(depth_frame)
                 color_frame = aligned_frames.get_color_frame()  # From frames.get_color_frame()
@@ -439,6 +449,10 @@ class seedlingClassifier():
         z3correction = (conedistances[2] - 46.16) * 10
         self.modbusClient.writeZcorrection(z1correction,z2correction,z3correction)
 
+    def classifySeedlingArea(self,leaf_area):
+        return self.seedlingClassifierModel.predict(np.array([leaf_area]).reshape(1,1))[0]
+
+
     def onlysegmentation(self,mode="offline"):
         if self.cameraInitializedFlag is True or mode is "offline":
             __processing_start = time()
@@ -456,7 +470,7 @@ class seedlingClassifier():
                 rgb_roi = rgb_padded[self.row_roi:, self.col_roi[0]:self.col_roi[1]]
 
                 ##Segmentation using depth
-                mask_depth_roi = np.where((depth_roi < 0.481) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
+                mask_depth_roi = np.where((depth_roi < 0.47) & (depth_roi > 0.28), 255, 0).astype(np.uint8)  # pixels between 3cm and 33 cm
                 preseg_rgb_roi = cv2.bitwise_and(rgb_roi, rgb_roi, mask=mask_depth_roi)
                 mask_depth[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = mask_depth_roi
                 preseg_rgb[self.row_roi:, self.col_roi[0]:self.col_roi[1]] = preseg_rgb_roi
@@ -466,19 +480,26 @@ class seedlingClassifier():
                 for roi in preseg_roi_ranges:
                     if roi[0][1]>roi[0][0] and roi[1][1]>roi[1][0]:
                         img_roi_yuv = cv2.cvtColor(preseg_rgb[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]],cv2.COLOR_BGR2YUV)
-                        nsp = int(0.003 * img_roi_yuv.shape[0] * img_roi_yuv.shape[1]) # Superpixels number = 0.3% Total pixel number
+                        img_roi_hsv = cv2.cvtColor(preseg_rgb[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]],cv2.COLOR_BGR2HSV_FULL)
+                        nsp = int(0.0025 * img_roi_yuv.shape[0] * img_roi_yuv.shape[1]) # Superpixels number = 0.3% Total pixel number
                         if nsp>4:
-                            labeled = slic(img_roi_yuv, n_segments=nsp, start_label=1,sigma=1.0)
+                            labeled = slic(img_roi_yuv, n_segments=nsp, start_label=1,sigma=1)
                             mask_seedlings_aux = np.zeros(img_roi_yuv.shape[0:2], dtype=np.uint8)
                             mask_cones_aux = np.zeros(img_roi_yuv.shape[0:2], dtype=np.uint8)
                             for label in range(1, np.max(labeled) + 1):
                                 selected_pixels = img_roi_yuv[labeled == label]
-                                mean = np.mean(selected_pixels, axis=0)
-                                ellipsoid_val = findEllipsoid(mean, self.ellipsoids_dict, eps=0.6)
-                                if  ellipsoid_val is "seedling":
+                                #selected_pixels = img_roi_hsv[labeled == label]
+                                mean = (np.mean(selected_pixels, axis=0).reshape((1,1,3))).astype(np.uint8)
+                                mean = cv2.cvtColor(cv2.cvtColor(mean,cv2.COLOR_YUV2BGR),cv2.COLOR_BGR2HSV_FULL)
+                                mean = mean.reshape(3)
+                                #ellipsoid_val = findEllipsoid(mean, self.ellipsoids_dict, eps=0.6)
+                                #if  ellipsoid_val is "seedling":
+                                #    mask_seedlings_aux = np.where(labeled == label, 255, mask_seedlings_aux).astype(np.uint8)
+                                #elif ellipsoid_val is "cone":
+                                #    mask_cones_aux = np.where(labeled == label, 255, mask_cones_aux).astype(np.uint8)
+                                #   checkIfInRange(mean,[48,25,60],[120,255,240])
+                                if checkIfInRange(mean,[40,30,60],[135,255,250]):
                                     mask_seedlings_aux = np.where(labeled == label, 255, mask_seedlings_aux).astype(np.uint8)
-                                elif ellipsoid_val is "cone":
-                                    mask_cones_aux = np.where(labeled == label, 255, mask_cones_aux).astype(np.uint8)
                             mask_seedlings[roi[0][0]:roi[0][1], roi[1][0]:roi[1][1]] = mask_seedlings_aux
                             mask_cones[roi[0][0]:roi[0][1], roi[1][0]:roi[1][1]] = mask_cones_aux
                 mask_seedlings = removeSmallRegions(mask_seedlings,RegionThresh=800)
@@ -518,9 +539,9 @@ class seedlingClassifier():
 
         #Classify seedlings according to their leaf area
         leaf_area_margins = [5.0,13.8,19.89]
-        q0 = classifySeedling(S0.area,leaf_area_margins)
-        q1 = classifySeedling(S1.area,leaf_area_margins)
-        q2 = classifySeedling(S2.area,leaf_area_margins)
+        q0 = self.classifySeedlingArea(S0.area) #classifySeedling(S0.area,leaf_area_margins)
+        q1 = self.classifySeedlingArea(S1.area) #classifySeedling(S1.area,leaf_area_margins)
+        q2 = self.classifySeedlingArea(S2.area) #classifySeedling(S2.area,leaf_area_margins)
         cv2.rectangle(rgbGUI, *S0.enclosingBox, [255, 0, 0], 2)
         cv2.rectangle(rgbGUI, *S1.enclosingBox, [255, 0, 0], 2)
         cv2.rectangle(rgbGUI, *S2.enclosingBox, [255, 0, 0], 2)

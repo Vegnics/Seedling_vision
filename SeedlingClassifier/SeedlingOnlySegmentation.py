@@ -169,23 +169,35 @@ with open("colors_ellipsoids_dict.pkl","rb") as file:
 #plcInstruction = lsmodb.PLC_PROCODD_INST
 
 #files = glob("../datasets/plantines-16-06-21-erick"+"/Depth*.jpg")
-files = glob("../datasets/seedling_dataset_02_06_2021_21/*.jpg")
+folder = "/home/amaranth/Desktop/Robot_UPAO/Seedling_vision/datasets/seedling_dataset_02_06_2021_21"
+files = glob("{}/*.jpg".format(folder))
 #print("../datasets/plantines-16-06-21-erick/Depth"+files[1][45:-3]+"npy")
 #num = 0
-#cvSystem.rgbImg = cv2.imread(files[num],1)
-#cvSystem.depthImg = cvSystem.depth_scale*np.load("../datasets/plantines-16-06-21-erick/Depth"+files[num][45:-3]+"npy")
+cvSystem.rgbImg = cv2.imread("../datasets/images_paper/Sample1.jpg",1)
+cvSystem.depthImg = cvSystem.depth_scale*np.load("../datasets/images_paper/Sample1.npy")
+seedling_mask,cones_mask= cvSystem.onlysegmentation()
+segmented = cv2.bitwise_and(cvSystem.rgbImg,cvSystem.rgbImg,mask=seedling_mask)
+cv2.imshow("original",cvSystem.rgbImg)
+cv2.imshow("segmented", segmented)
+cv2.imshow("colorized",colorizeDepth(cvSystem.depthImg,0.28,0.5))
+cv2.waitKey(0)
+cv2.destroyAllWindows()
 #segmented,mask = cvSystem.onlysegmentation()
 #cv2.imshow("mask",segmented)
 #cv2.waitKey(0)
 #cv2.destroyAllWindows()
-
-for file in files:
+"""for file in files:
     print(file)
     cvSystem.rgbImg = cv2.imread(file, 1)
+    #cvSystem.depthImg = depth_scale*np.load(file[0:-3] + "npy")
     cvSystem.depthImg = np.load(file[0:-3] + "npy")
+    print(len(file[54:-3]))
     seedling_mask,cones_mask= cvSystem.onlysegmentation()
     segmented = cv2.bitwise_and(cvSystem.rgbImg,cvSystem.rgbImg,mask=seedling_mask)
+    #cv2.imwrite(file[0:-4]+"_mask.png",seedling_mask)
     cv2.imshow("original",cvSystem.rgbImg)
     cv2.imshow("segmented", segmented)
+    cv2.imshow("colorized",colorizeDepth(cvSystem.depthImg,0.28,0.5))
     cv2.waitKey(0)
 cv2.destroyAllWindows()
+"""
