@@ -74,10 +74,26 @@ def remove_small_contours(contours,hierarchy,thresh):
 
 def calc_distance(depthimg,contour,hole_position,intrinsics):
     moments = cv2.moments(contour)
-    cu = int(moments['m10'] / moments['m00'])
-    cv = int(moments['m01'] / moments['m00'])
-    cnt_point = rs.rs2_deproject_pixel_to_point(intrinsics, [cu, cv], depthimg[cv, cu])
-    return ((100*cnt_point[0]-hole_position[0])**2 + (100*cnt_point[1]-hole_position[1])**2)**0.5
+    points = []
+    if len(contour)>40:
+        for idx in range(0,len(contour),10):
+            u = contour[idx,0,0]
+            v = contour[idx,0,1]
+            if 0.28<depthimg[v,u]<0.60:
+                pnt = rs.rs2_deproject_pixel_to_point(intrinsics, [u,v], depthimg[v,u])
+                points.append(pnt[0:2])
+    else:
+        for idx in range(len(contour)):
+            u = contour[idx,0,0]
+            v = contour[idx,0,1]
+            if 0.28<depthimg[v,u]<0.60:
+                pnt = rs.rs2_deproject_pixel_to_point(intrinsics, [u,v], depthimg[v,u])
+                points.append(pnt[0:2])
+    mean_point = np.mean(points,0)
+    #cu = int(moments['m10'] / moments['m00'])
+    #cv = int(moments['m01'] / moments['m00'])
+    #cnt_point = rs.rs2_deproject_pixel_to_point(intrinsics, [cu, cv], depthimg[cv, cu])
+    return ((100*mean_point[0]-hole_position[0])**2 + (100*mean_point[1]-hole_position[1])**2)**0.5
 
 
 def assignLabelContour(mask,contours):
@@ -244,6 +260,7 @@ def assign_to_seedling2(mask,contours,hierarchy,depthimg,hole_positions,maxdist,
 
     return Seedling_0,Seedling_1,Seedling_2
 
+
 def estimate_cones_distances(mask,depthimg,parity):
     ## The ranges specified below depends on the current camera position/orientation. If the camera were moved
     ## it would be neccessary to changes this ranges values according to the cones' positions.
@@ -338,6 +355,7 @@ class seedlingClassifier():
         self.initial_discard_frames = 30
         self.discard_frames = 5
         self.seedlingClassifierModel = None
+        self.colorSegmentationModel = None
         self.row_roi = 450
         self.col_roi = [360, 1200]
         self.hole_positions = [[-8.91548333333333,12.2185666666667],[-4.349625,11.0752125],[0.362765555555556,10.9953444444444],[4.84777,11.11838],[9.30483333333333,11.2195888888889],[14.1567625,11.200375]]
@@ -365,6 +383,7 @@ class seedlingClassifier():
             print("Cannot send seedlings quality")
 
     def cameraInitialize(self):
+        _stime = time()
         self.__rspipeline = rs.pipeline()
         self.__rsconfig = rs.config()
         self.__rsconfig.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
@@ -405,6 +424,7 @@ class seedlingClassifier():
             #depth_frame = self.__spatial_filter.process(depth_frame)
             depth_frame = self.__temp_filter.process(depth_frame)
         self.cameraInitializedFlag = True
+        print("Camera initialization time: {:2.3f}".format(time()-_stime))
     def cameraRestart(self):
         if self.__rspipeline is not None:
             try:
@@ -412,6 +432,7 @@ class seedlingClassifier():
             except Exception as e:
                 print("Camera not found: {}".format(e))
     def getImages(self,mode):
+        _stime = time()
         if mode is "online":
             if self.cameraInitializedFlag is False:
                 try:
@@ -433,6 +454,7 @@ class seedlingClassifier():
                 color_image = np.asanyarray(color_frame.get_data())
                 self.depthImg = self.depth_scale*depth_image
                 self.rgbImg = color_image
+                print("Imaging time: {:2.3f}".format(time() - _stime))
                 return True
             except Exception as e: #<-I have to check this
                 print("Problem while getting images: {}".format(e))
@@ -457,6 +479,7 @@ class seedlingClassifier():
         if self.cameraInitializedFlag is True or mode is "offline":
             __processing_start = time()
             if self.getImages(mode) is True:
+                _stime = time()
                 rgbGUI = self.rgbImg.copy()
                 rgb_padded = np.zeros(self.rgbImg.shape, dtype=np.uint8)
                 rgb_padded[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]] = self.rgbImg[self.row_roi:-1, self.col_roi[0]:self.col_roi[1]]
@@ -477,20 +500,25 @@ class seedlingClassifier():
                 preseg_roi_ranges = findPresegRois(mask_depth)
 
                 ##Segmentation using color
-                for roi in preseg_roi_ranges:
+                for idx,roi in enumerate(preseg_roi_ranges):
+                    ltime = localtime()
+                    name = "../subimages/IMG_{}_{}_{}_{}.png".format(ltime.tm_hour, ltime.tm_min, ltime.tm_sec,idx)
                     if roi[0][1]>roi[0][0] and roi[1][1]>roi[1][0]:
+                        #cv2.imwrite(name,preseg_rgb[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]])
                         img_roi_yuv = cv2.cvtColor(preseg_rgb[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]],cv2.COLOR_BGR2YUV)
                         img_roi_hsv = cv2.cvtColor(preseg_rgb[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]],cv2.COLOR_BGR2HSV_FULL)
-                        nsp = int(0.0025 * img_roi_yuv.shape[0] * img_roi_yuv.shape[1]) # Superpixels number = 0.3% Total pixel number
+                        #pixel_num = img_roi_yuv.shape[0] * img_roi_yuv.shape[1]
+                        pixel_num = np.sum(np.where(mask_depth[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]]>0,1,0))
+                        nsp = int(0.007 * pixel_num) # img_roi_yuv.shape[0] * img_roi_yuv.shape[1] Superpixels number = 0.3% Total pixel number
                         if nsp>4:
-                            labeled = slic(img_roi_yuv, n_segments=nsp, start_label=1,sigma=1)
+                            labeled = slic(img_roi_yuv, n_segments=nsp, start_label=1,sigma=1,mask=mask_depth[roi[0][0]:roi[0][1],roi[1][0]:roi[1][1]])
                             mask_seedlings_aux = np.zeros(img_roi_yuv.shape[0:2], dtype=np.uint8)
                             mask_cones_aux = np.zeros(img_roi_yuv.shape[0:2], dtype=np.uint8)
                             for label in range(1, np.max(labeled) + 1):
                                 selected_pixels = img_roi_yuv[labeled == label]
                                 #selected_pixels = img_roi_hsv[labeled == label]
                                 mean = (np.mean(selected_pixels, axis=0).reshape((1,1,3))).astype(np.uint8)
-                                mean = cv2.cvtColor(cv2.cvtColor(mean,cv2.COLOR_YUV2BGR),cv2.COLOR_BGR2HSV_FULL)
+                                #mean = cv2.cvtColor(cv2.cvtColor(mean,cv2.COLOR_YUV2BGR),cv2.COLOR_BGR2HSV_FULL)
                                 mean = mean.reshape(3)
                                 #ellipsoid_val = findEllipsoid(mean, self.ellipsoids_dict, eps=0.6)
                                 #if  ellipsoid_val is "seedling":
@@ -498,11 +526,12 @@ class seedlingClassifier():
                                 #elif ellipsoid_val is "cone":
                                 #    mask_cones_aux = np.where(labeled == label, 255, mask_cones_aux).astype(np.uint8)
                                 #   checkIfInRange(mean,[48,25,60],[120,255,240])
-                                if checkIfInRange(mean,[40,30,60],[135,255,250]):
+                                if self.colorSegmentationModel.predict(mean.reshape((-1,3))) == 1.0: #[35,30,60],[139,255,250])  checkIfInRange(mean,[25,10,60],[170,255,251])
                                     mask_seedlings_aux = np.where(labeled == label, 255, mask_seedlings_aux).astype(np.uint8)
                             mask_seedlings[roi[0][0]:roi[0][1], roi[1][0]:roi[1][1]] = mask_seedlings_aux
                             mask_cones[roi[0][0]:roi[0][1], roi[1][0]:roi[1][1]] = mask_cones_aux
                 mask_seedlings = removeSmallRegions(mask_seedlings,RegionThresh=800)
+                print("Segmentation time: {:2.3f}".format(time() - _stime))
                 return mask_seedlings,mask_cones
             else:
                 self.rgbImg = None
@@ -515,20 +544,31 @@ class seedlingClassifier():
 
     def processSeedlings(self,seedlingParity,mode="offline"):
         __processing_start = time()
+        _stime = time()
         mask_seedlings,mask_cones = self.onlysegmentation(mode)
         rgbGUI = self.rgbImg.copy()
         #Obtain camera-cones distances
         cone_distances = estimate_cones_distances(mask_cones, self.depthImg, seedlingParity)
         ##Obtain contours
         if cv2.__version__ >= "4.0":
-            contours, hierar = cv2.findContours(mask_seedlings, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+            contours, hierar = cv2.findContours(mask_seedlings, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         else:
-            _,contours, hierar = cv2.findContours(mask_seedlings, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+            _,contours, hierar = cv2.findContours(mask_seedlings, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         contours,hierar = remove_small_contours(contours,hierar, 45)
-        cv2.drawContours(rgbGUI, contours, -1, [100, 60, 200], 2)
 
         ## ASSIGN REGIONS AND CONTOURS TO SEEDLING HOLES AND CLASSIFY THEM
         S0, S1, S2 = assign_to_seedling2(mask_seedlings, contours,hierar, self.depthImg, self.hole_positions, 6.9,seedlingParity,self.intrinsics,cone_distances)
+
+        print("Area estimation time: {:2.3f}".format(time() - _stime))
+
+        if cv2.__version__ >= "4.0":
+            contours, hierar = cv2.findContours(mask_seedlings, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        else:
+            _,contours, hierar = cv2.findContours(mask_seedlings, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        #contours, hierar = remove_small_contours(contours, hierar, 45)
+
+        cv2.drawContours(rgbGUI, contours, -1, [100, 60, 200], 2)
+
         """
         ##This block could be used in the case there exists any machine learning based classifier model
         
@@ -539,12 +579,17 @@ class seedlingClassifier():
 
         #Classify seedlings according to their leaf area
         leaf_area_margins = [5.0,13.8,19.89]
+        if self.seedlingClassifierModel is None:
+            raise Exception("ERROR: Seedling LinearSVC model wasn't specified")
+        _stime = time()
         q0 = self.classifySeedlingArea(S0.area) #classifySeedling(S0.area,leaf_area_margins)
         q1 = self.classifySeedlingArea(S1.area) #classifySeedling(S1.area,leaf_area_margins)
         q2 = self.classifySeedlingArea(S2.area) #classifySeedling(S2.area,leaf_area_margins)
-        cv2.rectangle(rgbGUI, *S0.enclosingBox, [255, 0, 0], 2)
-        cv2.rectangle(rgbGUI, *S1.enclosingBox, [255, 0, 0], 2)
-        cv2.rectangle(rgbGUI, *S2.enclosingBox, [255, 0, 0], 2)
+        print("Classification time: {:2.3f}".format(time() - _stime))
+
+        cv2.rectangle(rgbGUI, *S0.enclosingBox, [255, 0, 0], 1)
+        cv2.rectangle(rgbGUI, *S1.enclosingBox, [255, 0, 0], 1)
+        cv2.rectangle(rgbGUI, *S2.enclosingBox, [255, 0, 0], 1)
         print("S0: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S0.area, S0.height,q0,cone_distances[0]))
         print("S1: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S1.area, S1.height,q1,cone_distances[1]))
         print("S2: Area = {:3.3f} cm\u00b2, Average Height= {:3.3f} cm, quality? = {}, Cone distance = {}".format(S2.area, S2.height,q2,cone_distances[2]))

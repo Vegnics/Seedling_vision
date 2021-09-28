@@ -81,7 +81,7 @@ SAVE_IMAGES = True
 args = sys.argv
 
 modServerIp = "192.168.1.103"
-modServerPort = 5030
+modServerPort = 502
 mqttBrokerIp = "192.168.1.103"
 mqttBrokerPort = 1883
 plugTrayNum = None
